@@ -1,0 +1,49 @@
+{
+  "name": "Kusho CRX",
+  "version": "0.11.0",
+  "manifest_version": 3,
+  "icons": {
+    "128": "icon-192x192.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_icon": {
+      "128": "icon-192x192.png"
+    },
+    "default_title": "Record"
+  },
+  "commands": {
+    "record": {
+      "suggested_key": {
+        "default": "Shift+Alt+R"
+      },
+      "description": "Start recording"
+    },
+    "inspect": {
+      "suggested_key": {
+        "default": "Shift+Alt+C"
+      },
+      "description": "Start inspecting"
+    }
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "options_ui": {
+    "page": "preferences.html",
+    "open_in_tab": false
+  },
+  "permissions": [
+    "debugger",
+    "tabs",
+    "contextMenus",
+    "storage",
+    "sidePanel"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'"
+  }
+}

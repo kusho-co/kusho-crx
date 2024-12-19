@@ -1,0 +1,15 @@
+[*]
+../
+../codegen/language.ts
+../codegen/languages.ts
+../isomorphic/**
+../registry/**
+../../common/
+../../generated/pollingRecorderSource.ts
+../../protocol/
+../../utils/**
+../../utilsBundle.ts
+../../zipBundle.ts
+
+[recorderInTraceViewer.ts]
+../trace/viewer/traceViewer.ts

@@ -1,0 +1,7 @@
+[*]
+../../common/
+../../generated/
+../../protocol/
+../../utils/
+../../zipBundle.ts
+../**
