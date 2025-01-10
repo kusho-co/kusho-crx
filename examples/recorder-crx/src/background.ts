@@ -17,6 +17,65 @@
 import { Mode } from '@recorder/recorderTypes';
 import type { CrxApplication } from 'playwright-crx';
 import playwright, { crx, registerSourceMap, _debug, _setUnderTest } from 'playwright-crx';
+import posthog from 'posthog-js'
+
+// Safe PostHog tracking wrapper
+const analytics = {
+  init: () => {
+    try {
+      posthog.init('phc_6aJLwW6H2Br5eIvmkHp4ucruc0ARVAQKSts8epprVLw', {
+        api_host: 'https://d3i24tnd0dzgfi.cloudfront.net',
+        ui_host: 'https://us.i.posthog.com',
+        person_profiles: 'identified_only', // or 'always' to create profiles for anonymous users as well
+
+        persistence: 'localStorage',
+        autocapture: false,
+        capture_pageview: false,
+        capture_performance: true,
+        bootstrap: {
+          distinctID: chrome.runtime.id,
+          isIdentifiedID: true
+        }
+      });
+
+      // Identify the installation
+      posthog.identify(chrome.runtime.id, {
+        app_name: 'Playwright Recorder',
+        extension_version: chrome.runtime.getManifest().version,
+        browser: navigator.userAgent,
+        platformInfo: (navigator as any).userAgentData?.platform || navigator.platform,
+        language: navigator.language,
+      });
+    } catch (error) {
+      console.error('PostHog initialization failed:', error);
+    }
+  },
+
+  capture: (eventName: string, properties: any = {}) => {
+    try {
+      // Add common properties to all events
+      const enrichedProperties = {
+        ...properties,
+        app_name: 'Playwright Recorder',
+        timestamp: new Date().toISOString(),
+        extension_version: chrome.runtime.getManifest().version,
+        browser_info: navigator.userAgent,
+        memory_usage: (performance as any)?.memory?.usedJSHeapSize || undefined,
+        attached_tabs_count: attachedTabIds.size,
+        current_mode: currentMode,
+        language: language
+      };
+
+      posthog.capture(eventName, enrichedProperties);
+    } catch (error) {
+      console.error(`PostHog event capture failed for ${eventName}:`, error);
+      throw error
+    }
+  }
+};
+
+// Initialize PostHog
+analytics.init();
 
 registerSourceMap().catch(() => { });
 
@@ -32,6 +91,8 @@ const attachedTabIds = new Set<number>();
 let currentMode: CrxMode | 'detached' | undefined;
 let language: string | undefined;
 let sidepanel = true;
+let lastModeChangeTime: number | undefined;
+const tabAttachTimes = new Map<number, number>();
 
 async function changeAction(tabId: number, mode?: CrxMode | 'detached') {
   if (!mode) {
@@ -75,14 +136,54 @@ async function getCrxApp() {
       });
       crxApp.recorder.addListener('modechanged', async ({ mode }) => {
         await Promise.all([...attachedTabIds].map(tabId => changeAction(tabId, mode)));
+        analytics.capture('recorder_mode_changed', {
+          mode,
+          previous_mode: currentMode,
+          duration_in_previous_mode: currentMode ? Date.now() - (lastModeChangeTime || Date.now()) : 0
+        });
+
+        // Track recording start/stop events
+        const wasRecording = recordingModes.includes(currentMode as CrxMode);
+        const isRecording = recordingModes.includes(mode);
+
+        if (!wasRecording && isRecording) {
+          analytics.capture('recording_started', {
+            from_mode: currentMode,
+            attached_tabs: Array.from(attachedTabIds)
+          });
+        } else if (wasRecording && !isRecording) {
+          analytics.capture('recording_stopped', {
+            to_mode: mode,
+            duration: Date.now() - (lastModeChangeTime || Date.now()),
+            attached_tabs: Array.from(attachedTabIds)
+          });
+        }
+
+        lastModeChangeTime = Date.now();
       });
       crxApp.addListener('attached', async ({ tabId }) => {
         attachedTabIds.add(tabId);
         await changeAction(tabId, crxApp.recorder.mode);
+        const currentTab = await chrome.tabs.get(tabId);
+        analytics.capture('recorder_attached', {
+          tabId,
+          url: currentTab?.url,
+          title: currentTab?.title,
+          window_id: currentTab?.windowId,
+          is_incognito: currentTab?.incognito,
+          tab_status: currentTab?.status,
+          tab_index: currentTab?.index
+        });
       });
       crxApp.addListener('detached', async tabId => {
         attachedTabIds.delete(tabId);
         await changeAction(tabId, 'detached');
+        analytics.capture('recorder_detached', {
+          tabId,
+          reason: 'user_initiated',
+          session_duration: Date.now() - (tabAttachTimes.get(tabId) || Date.now())
+        });
+        tabAttachTimes.delete(tabId);
       });
       if (!testIdAttributeName)
         setTestIdAttributeName(testIdAttributeName);
@@ -136,8 +237,8 @@ async function setTestIdAttributeName(testIdAttributeName: string) {
 chrome.action.onClicked.addListener(attach);
 
 chrome.contextMenus.create({
-  id: 'ku-recorder',
-  title: 'Attach to Kusho Recorder',
+  id: 'pw-recorder',
+  title: 'Attach to Playwright Recorder',
   contexts: ['all'],
 });
 
@@ -215,6 +316,15 @@ async function doSave(params: { body: string, suggestedName: string }) {
 
 async function saveScript(params: { code: string, suggestedName: string }) {
   await doSave({ body: params.code, suggestedName: params.suggestedName });
+  analytics.capture('script_saved', {
+    fileName: params.suggestedName,
+    codeLength: params.code.length,
+    fileExtension: params.suggestedName.split('.').pop(),
+    containsAssertions: params.code.includes('expect') || params.code.includes('assert'),
+    linesOfCode: params.code.split('\n').length,
+    hasComments: params.code.includes('//') || params.code.includes('/*'),
+    commandCount: (params.code.match(/\.(click|type|fill|select|check|uncheck|press)/g) || []).length
+  });
 }
 
 async function saveStorageState() {
@@ -248,13 +358,21 @@ async function saveStorageState() {
     body: JSON.stringify(storageState, undefined, 2),
     suggestedName: 'storageState.json',
   });
+
+  analytics.capture('storage_state_saved', {
+    cookiesCount: cookies.length,
+    originsCount: origins.length,
+    domains: cookies.map(c => c.domain),
+    urlsCount: urls.length,
+    uniqueHostnames: Array.from(new Set(parsedURLs.map(u => u.hostname))).length
+  });
 }
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.event === 'saveRequested')
-    saveScript(message.params).catch(e => { });
+    saveScript(message.params).catch(() => { });
   else if (message.event === 'saveStorageStateRequested')
-    saveStorageState().catch(e => { });
+    saveStorageState().catch(() => { });
 });
 
 // for testing
