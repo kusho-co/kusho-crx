@@ -128,7 +128,7 @@ export const Recorder: React.FC<RecorderProps> = ({
     <Toolbar>
       <ToolbarButton icon='circle-large-filled' title='Record' toggled={mode === 'recording' || mode === 'recording-inspecting' || mode === 'assertingText' || mode === 'assertingVisibility'} onClick={() => {
         window.dispatch({ event: 'setMode', params: { mode: mode === 'none' || mode === 'standby' || mode === 'inspecting' ? 'recording' : 'standby' } });
-      }}>Record</ToolbarButton>
+      }}>{mode === 'recording' || mode === 'recording-inspecting' || mode === 'assertingText' || mode === 'assertingVisibility' ? 'Recording' : 'Stopped'}</ToolbarButton>
       <ToolbarSeparator />
       <ToolbarButton icon='inspect' title='Pick locator' toggled={mode === 'inspecting' || mode === 'recording-inspecting'} onClick={() => {
         const newMode = {
